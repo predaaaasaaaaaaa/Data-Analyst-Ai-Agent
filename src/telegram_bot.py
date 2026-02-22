@@ -77,11 +77,6 @@ Any questions? Just send me an image to get started!
     async def handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle photo uploads"""
         try:
-            # Check user authorization (optional)
-            if config.TELEGRAM_USER_ID and str(update.effective_user.id) != config.TELEGRAM_USER_ID:
-                await update.message.reply_text("❌ Unauthorized access")
-                return
-
             # Send processing message
             processing_msg = await update.message.reply_text("🔄 Processing image... This may take a moment.")
             
