@@ -98,8 +98,13 @@ class ImageProcessor:
             # Group into rows by vertical proximity
             rows = self._group_into_rows(text_boxes)
             
+            self.logger.info(f"Grouped into {len(rows)} rows")
+            for i, row in enumerate(rows[:5]):
+                self.logger.info(f"Row {i}: {len(row)} cells")
+            
             if not rows or len(rows) < 2:
                 # Fallback: create single column DataFrame
+                self.logger.warning("Not enough rows, using fallback")
                 df = pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
                 return df
             
