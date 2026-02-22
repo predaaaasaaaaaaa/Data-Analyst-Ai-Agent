@@ -7,12 +7,10 @@ Main entry point for the Telegram bot
 import asyncio
 import logging
 import sys
-from pathlib import Path
 
 import config
 from src.agent import create_agent
 
-# Configure logging
 logging.basicConfig(
     level=config.LOG_LEVEL,
     format=config.LOG_FORMAT,
@@ -23,21 +21,19 @@ logger = logging.getLogger(__name__)
 
 async def main():
     """Main entry point"""
+    logger.info("=" * 60)
+    logger.info("Starting Data Analyst AI Agent")
+    logger.info("=" * 60)
+
+    bot_token = config.TELEGRAM_BOT_TOKEN
+    if not bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN not configured")
+        sys.exit(1)
+
+    agent = create_agent(bot_token)
+
     try:
-        logger.info("=" * 60)
-        logger.info("Starting Data Analyst AI Agent")
-        logger.info("=" * 60)
-        
-        # Get bot token
-        bot_token = config.TELEGRAM_BOT_TOKEN
-        if not bot_token:
-            logger.error("TELEGRAM_BOT_TOKEN not configured")
-            sys.exit(1)
-        
-        # Create and run agent
-        agent = create_agent(bot_token)
         await agent.run()
-        
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
     except Exception as e:

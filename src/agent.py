@@ -21,12 +21,10 @@ class DataAnalystAgent:
         try:
             self.logger.info("Initializing Data Analyst Agent...")
             
-            # Verify bot token
             if not self.bot_token:
                 self.logger.error("Bot token not configured")
                 return False
             
-            # Create necessary directories
             config.DATA_DIR.mkdir(exist_ok=True)
             config.UPLOADS_DIR.mkdir(exist_ok=True)
             config.REPORTS_DIR.mkdir(exist_ok=True)
@@ -40,18 +38,16 @@ class DataAnalystAgent:
 
     async def run(self):
         """Run the agent"""
+        if not await self.initialize():
+            self.logger.error("Initialization failed")
+            return
+        
+        self.logger.info("Starting bot...")
         try:
-            # Initialize
-            if not await self.initialize():
-                self.logger.error("Initialization failed")
-                return
-            
-            # Start bot
-            self.logger.info("Starting bot...")
             await self.bot.run()
-            
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             self.logger.info("Agent stopped by user")
+            self.bot.stop()
         except Exception as e:
             self.logger.error(f"Agent error: {e}", exc_info=True)
             raise
