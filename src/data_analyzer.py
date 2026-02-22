@@ -174,27 +174,96 @@ class DataAnalyzer:
         return trends if trends else {'note': 'No trends detected'}
 
     def _generate_insights(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Generate actionable insights"""
+        """Generate business-focused actionable insights like a human analyst"""
         insights = []
         
-        # Missing data insight
+        # Get trends for business analysis
+        trends = self._detect_trends(df)
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        # Identify business metrics by common naming patterns
+        revenue_cols = [c for c in numeric_cols if any(x in c.lower() for x in ['revenue', 'sales', 'income'])]
+        cost_cols = [c for c in numeric_cols if any(x in c.lower() for x in ['cost', 'expense', 'spend'])]
+        customer_cols = [c for c in numeric_cols if any(x in c.lower() for x in ['customer', 'user', 'client'])]
+        order_cols = [c for c in numeric_cols if any(x in c.lower() for x in ['order', 'transaction', 'purchase'])]
+        value_cols = [c for c in numeric_cols if any(x in c.lower() for x in ['value', 'price', 'avg', 'average'])]
+        
+        # BUSINESS INSIGHT 1: Revenue performance
+        if revenue_cols and isinstance(trends.get(revenue_cols[0]), dict):
+            rev_trend = trends[revenue_cols[0]]
+            change_pct = rev_trend.get('change_percentage', 0)
+            direction = rev_trend.get('trend', '')
+            
+            if abs(change_pct) > 10:
+                # Connect to customer growth if available
+                driver = ""
+                if customer_cols and isinstance(trends.get(customer_cols[0]), dict):
+                    cust_change = trends[customer_cols[0]].get('change_percentage', 0)
+                    if cust_change > 10:
+                        driver = f" driven by {cust_change:.1f}% customer growth"
+                
+                insights.append(
+                    f"Revenue {direction} {abs(change_pct):.1f}%{driver}. "
+                    f"{'Strong performance - investigate what strategies are working to replicate success.' if change_pct > 20 else 'Monitor closely and identify growth drivers.'}"
+                )
+        
+        # BUSINESS INSIGHT 2: Profitability analysis
+        if revenue_cols and cost_cols:
+            rev_col, cost_col = revenue_cols[0], cost_cols[0]
+            if isinstance(trends.get(rev_col), dict) and isinstance(trends.get(cost_col), dict):
+                rev_change = trends[rev_col].get('change_percentage', 0)
+                cost_change = trends[cost_col].get('change_percentage', 0)
+                
+                if cost_change > rev_change and cost_change > 5:
+                    margin_pressure = cost_change - rev_change
+                    insights.append(
+                        f"⚠️ Profit margin pressure: Costs growing {cost_change:.1f}% while revenue grows {rev_change:.1f}%. "
+                        f"Recommend cost optimization review and pricing strategy assessment."
+                    )
+                elif rev_change > cost_change and rev_change > 10:
+                    insights.append(
+                        f"✅ Improving profitability: Revenue outpacing costs ({rev_change:.1f}% vs {cost_change:.1f}%). "
+                        f"Good operational efficiency - maintain current cost controls."
+                    )
+        
+        # BUSINESS INSIGHT 3: Customer value analysis
+        if value_cols and customer_cols:
+            val_col = value_cols[0]
+            if isinstance(trends.get(val_col), dict):
+                val_change = trends[val_col].get('change_percentage', 0)
+                
+                if val_change < -5:
+                    insights.append(
+                        f"⚠️ Declining customer value: Average value per customer down {abs(val_change):.1f}%. "
+                        f"Investigate product mix changes and consider upselling/cross-selling initiatives to recover value."
+                    )
+                elif val_change > 10:
+                    insights.append(
+                        f"✅ Increasing customer value: Up {val_change:.1f}%. "
+                        f"Current strategies are working - document and replicate successful tactics."
+                    )
+        
+        # BUSINESS INSIGHT 4: Growth sustainability
+        if order_cols and customer_cols:
+            if isinstance(trends.get(order_cols[0]), dict) and isinstance(trends.get(customer_cols[0]), dict):
+                order_change = trends[order_cols[0]].get('change_percentage', 0)
+                cust_change = trends[customer_cols[0]].get('change_percentage', 0)
+                
+                if order_change > cust_change + 10:
+                    insights.append(
+                        f"📈 Strong customer engagement: Orders growing faster than customer base ({order_change:.1f}% vs {cust_change:.1f}%). "
+                        f"Existing customers are buying more - retention strategies are working."
+                    )
+        
+        # DATA QUALITY INSIGHTS (brief, business-focused)
         missing_pct = df.isnull().sum().sum() / (len(df) * len(df.columns)) * 100
         if missing_pct > 10:
-            insights.append(f"Warning: {missing_pct:.1f}% of data is missing. Consider data cleaning.")
+            insights.append(
+                f"⚠️ Data completeness issue: {missing_pct:.1f}% missing values may affect analysis accuracy. "
+                f"Review data collection processes."
+            )
         
-        # Duplicate insight
-        dup_count = len(df[df.duplicated()])
-        if dup_count > 0:
-            insights.append(f"Found {dup_count} duplicate rows ({dup_count/len(df)*100:.1f}%). Consider removing duplicates.")
-        
-        # Skewness insight
-        numeric_df = df.select_dtypes(include=[np.number])
-        for col in numeric_df.columns:
-            skew = numeric_df[col].skew()
-            if abs(skew) > 1:
-                insights.append(f"Column '{col}' has high skewness ({skew:.2f}). Consider log transformation.")
-        
-        return {'insights': insights} if insights else {'insights': ['Data looks clean and well-distributed']}
+        return {'insights': insights} if insights else {'insights': ['Dataset is clean. No significant trends or anomalies detected.']}
 
 
 def analyze_data(df: pd.DataFrame) -> Dict[str, Any]:
