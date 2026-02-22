@@ -108,8 +108,10 @@ class ImageProcessor:
                 df = pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
                 return df
             
-            # Find the row with most cells (likely the header row)
-            header_row_idx = max(range(len(rows)), key=lambda i: len(rows[i]))
+            # Find the row with most cells among the first few rows (headers are at the top)
+            # Only check first 5 rows to avoid picking data rows with extra splits
+            header_candidates = min(5, len(rows))
+            header_row_idx = max(range(header_candidates), key=lambda i: len(rows[i]))
             header_row = rows[header_row_idx]
             
             self.logger.info(f"Selected row {header_row_idx} as header (has {len(header_row)} cells)")
