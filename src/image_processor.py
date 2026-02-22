@@ -112,6 +112,9 @@ class ImageProcessor:
             header_row_idx = max(range(len(rows)), key=lambda i: len(rows[i]))
             header_row = rows[header_row_idx]
             
+            self.logger.info(f"Selected row {header_row_idx} as header (has {len(header_row)} cells)")
+            self.logger.info(f"Header texts: {[box['text'] for box in header_row[:5]]}")
+            
             # Determine columns from header row
             column_positions = self._detect_columns(header_row)
             
