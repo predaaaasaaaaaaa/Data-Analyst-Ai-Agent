@@ -21,6 +21,7 @@ class DataAnalystBot:
         self.data_analyzer = DataAnalyzer()
         self.excel_generator = ExcelReportGenerator()
         self.logger = logger
+        self._stop_event = asyncio.Event()
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -33,12 +34,12 @@ I can help you analyze data from images. Just:
 3. I'll analyze it and send you a detailed Excel report
 
 📊 What I can do:
-• Extract data from images (tables, charts)
-• Calculate statistics (mean, median, std dev, etc.)
-• Detect outliers and anomalies
-• Analyze correlations
-• Generate professional Excel reports
-• Provide actionable insights
+- Extract data from images (tables, charts)
+- Calculate statistics (mean, median, std dev, etc.)
+- Detect outliers and anomalies
+- Analyze correlations
+- Generate professional Excel reports
+- Provide actionable insights
 
 Use /help for more information.
         """
@@ -60,14 +61,14 @@ Use /help for more information.
    • Insights & recommendations
 
 🎯 Supported formats:
-• JPG, PNG, GIF
-• Tables in images
-• Screenshots of spreadsheets
+- JPG, PNG, GIF
+- Tables in images
+- Screenshots of spreadsheets
 
 ⚠️ Tips:
-• Make sure the image is clear and readable
-• Tables with headers work best
-• File size limit: 25MB
+- Make sure the image is clear and readable
+- Tables with headers work best
+- File size limit: 25MB
 
 Any questions? Just send me an image to get started!
         """
@@ -133,8 +134,8 @@ Any questions? Just send me an image to get started!
 ✅ Analysis Complete!
 
 📊 Data Summary:
-• Rows: {df.shape[0]}
-• Columns: {df.shape[1]}
+- Rows: {df.shape[0]}
+- Columns: {df.shape[1]}
 
 📈 Key Findings:
 """
@@ -180,10 +181,22 @@ Any questions? Just send me an image to get started!
         return app
 
     async def run(self):
-        """Run the bot"""
+        """Run the bot inside an already-running event loop"""
         app = self.get_application()
         self.logger.info("Starting Data Analyst Bot...")
-        await app.run_polling()
+
+        async with app:
+            await app.start()
+            await app.updater.start_polling()
+            self.logger.info("Bot is polling. Press Ctrl+C to stop.")
+            # Wait until stop() is called or KeyboardInterrupt
+            await self._stop_event.wait()
+            await app.updater.stop()
+            await app.stop()
+
+    def stop(self):
+        """Signal the bot to stop"""
+        self._stop_event.set()
 
 
 async def start_bot(token: str):
