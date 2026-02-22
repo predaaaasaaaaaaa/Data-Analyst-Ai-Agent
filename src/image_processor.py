@@ -3,9 +3,8 @@ import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 import easyocr
-import pytesseract
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class ImageProcessor:
 
     def extract_data_from_image(self, image_path: str) -> Optional[pd.DataFrame]:
         """
-        Extract tabular data from image using OCR
+        Extract tabular data from image using OCR with spatial awareness
         
         Args:
             image_path: Path to image file
@@ -38,118 +37,102 @@ class ImageProcessor:
                 self.logger.error(f"Failed to read image: {image_path}")
                 return None
             
-            # Try table detection first
-            df = self._detect_table(img)
-            if df is not None and len(df) > 0:
-                self.logger.info(f"Table detected: {df.shape[0]} rows, {df.shape[1]} columns")
-                return df
+            # Extract text with spatial information
+            results = self.reader.readtext(img)
             
-            # Fallback to OCR-based extraction
-            df = self._extract_via_ocr(img)
+            if not results:
+                self.logger.warning("No text detected in image")
+                return None
+            
+            # Parse as table using spatial layout
+            df = self._parse_spatial_table(results, img.shape)
+            
             if df is not None and len(df) > 0:
-                self.logger.info(f"Data extracted via OCR: {df.shape[0]} rows, {df.shape[1]} columns")
+                self.logger.info(f"Table extracted: {df.shape[0]} rows, {df.shape[1]} columns")
                 return df
                 
-            self.logger.warning("No data could be extracted from image")
+            self.logger.warning("Could not extract structured table from image")
             return None
             
         except Exception as e:
             self.logger.error(f"Error extracting data from image: {e}", exc_info=True)
             return None
 
-    def _detect_table(self, img) -> Optional[pd.DataFrame]:
-        """Detect and extract table from image"""
+    def _parse_spatial_table(self, ocr_results: List, img_shape: Tuple) -> Optional[pd.DataFrame]:
+        """
+        Parse OCR results into table using spatial layout
+        
+        OCR results format: [(bbox, text, confidence), ...]
+        where bbox = [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        """
         try:
-            # Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-            # Apply preprocessing
-            blur = cv2.GaussianBlur(gray, (3, 3), 0)
-            _, thresh = cv2.threshold(blur, 127, 255, cv2.THRESH_BINARY)
-            
-            # Find contours
-            contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            
-            if not contours:
+            if not ocr_results:
                 return None
             
-            # Find largest contour (likely the table)
-            largest = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest)
+            # Extract text boxes with positions
+            text_boxes = []
+            for bbox, text, conf in ocr_results:
+                # Get bounding box coordinates
+                x_coords = [point[0] for point in bbox]
+                y_coords = [point[1] for point in bbox]
+                
+                x_min, x_max = min(x_coords), max(x_coords)
+                y_min, y_max = min(y_coords), max(y_coords)
+                x_center = (x_min + x_max) / 2
+                y_center = (y_min + y_max) / 2
+                
+                text_boxes.append({
+                    'text': text.strip(),
+                    'x_min': x_min,
+                    'x_max': x_max,
+                    'y_min': y_min,
+                    'y_max': y_max,
+                    'x_center': x_center,
+                    'y_center': y_center,
+                    'confidence': conf
+                })
             
-            # Extract table region
-            table_region = img[y:y+h, x:x+w]
+            # Sort by vertical position (top to bottom)
+            text_boxes.sort(key=lambda x: x['y_center'])
             
-            # Use OCR on table region
-            results = self.reader.readtext(table_region)
-            
-            if not results:
-                return None
-            
-            # Convert OCR results to structured data
-            text_data = [r[1] for r in results]
-            
-            # Try to parse as table
-            df = self._parse_ocr_as_table(text_data)
-            return df
-            
-        except Exception as e:
-            self.logger.debug(f"Table detection failed: {e}")
-            return None
-
-    def _extract_via_ocr(self, img) -> Optional[pd.DataFrame]:
-        """Extract data using OCR directly"""
-        try:
-            # Use EasyOCR
-            results = self.reader.readtext(img)
-            
-            if not results:
-                return None
-            
-            # Extract text
-            text_data = [r[1] for r in results]
-            
-            # Parse as table
-            df = self._parse_ocr_as_table(text_data)
-            return df
-            
-        except Exception as e:
-            self.logger.debug(f"OCR extraction failed: {e}")
-            return None
-
-    def _parse_ocr_as_table(self, text_data) -> Optional[pd.DataFrame]:
-        """Parse OCR text data into structured DataFrame"""
-        try:
-            if not text_data:
-                return None
-            
-            # Try to detect headers and rows
-            # Simple heuristic: split by common delimiters
-            rows = []
-            for line in text_data:
-                # Try to split by common separators
-                cells = [cell.strip() for cell in line.split() if cell.strip()]
-                if cells:
-                    rows.append(cells)
+            # Group into rows by vertical proximity
+            rows = self._group_into_rows(text_boxes)
             
             if not rows or len(rows) < 2:
-                # If can't parse, create single column DataFrame
-                df = pd.DataFrame({'Data': text_data})
+                # Fallback: create single column DataFrame
+                df = pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
                 return df
             
+            # Determine columns from first row (headers)
+            column_positions = self._detect_columns(rows[0])
+            
+            # Organize all rows into table structure
+            table_data = []
+            for row_boxes in rows:
+                row_data = [''] * len(column_positions)
+                for box in row_boxes:
+                    # Find which column this box belongs to
+                    col_idx = self._assign_to_column(box, column_positions)
+                    if col_idx < len(row_data):
+                        # Append if cell already has content
+                        if row_data[col_idx]:
+                            row_data[col_idx] += ' ' + box['text']
+                        else:
+                            row_data[col_idx] = box['text']
+                table_data.append(row_data)
+            
             # Create DataFrame
-            # Use first row as header if it looks like headers
-            headers = rows[0]
-            data = rows[1:]
+            if len(table_data) < 2:
+                return pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
             
-            # Pad rows to same length as headers
-            padded_data = []
-            for row in data:
-                if len(row) < len(headers):
-                    row.extend([''] * (len(headers) - len(row)))
-                padded_data.append(row[:len(headers)])
+            # Use first row as headers
+            headers = table_data[0]
+            data_rows = table_data[1:]
             
-            df = pd.DataFrame(padded_data, columns=headers)
+            # Clean headers
+            headers = [str(h).strip() if h else f'Column_{i}' for i, h in enumerate(headers)]
+            
+            df = pd.DataFrame(data_rows, columns=headers)
             
             # Try to convert numeric columns
             for col in df.columns:
@@ -161,8 +144,59 @@ class ImageProcessor:
             return df
             
         except Exception as e:
-            self.logger.debug(f"Failed to parse OCR data as table: {e}")
-            return None
+            self.logger.debug(f"Failed to parse spatial table: {e}")
+            # Fallback: single column
+            texts = [box['text'] for box in text_boxes]
+            return pd.DataFrame({'Data': texts}) if texts else None
+
+    def _group_into_rows(self, text_boxes: List[dict], y_threshold: float = 20) -> List[List[dict]]:
+        """Group text boxes into rows based on vertical position"""
+        if not text_boxes:
+            return []
+        
+        rows = []
+        current_row = [text_boxes[0]]
+        current_y = text_boxes[0]['y_center']
+        
+        for box in text_boxes[1:]:
+            # If box is close vertically to current row, add to current row
+            if abs(box['y_center'] - current_y) < y_threshold:
+                current_row.append(box)
+            else:
+                # Start new row
+                # Sort current row by x position (left to right)
+                current_row.sort(key=lambda x: x['x_center'])
+                rows.append(current_row)
+                current_row = [box]
+                current_y = box['y_center']
+        
+        # Add last row
+        if current_row:
+            current_row.sort(key=lambda x: x['x_center'])
+            rows.append(current_row)
+        
+        return rows
+
+    def _detect_columns(self, first_row: List[dict]) -> List[float]:
+        """Detect column positions from first row"""
+        if not first_row:
+            return []
+        
+        # Use x_center of each box in first row as column positions
+        column_positions = [box['x_center'] for box in first_row]
+        column_positions.sort()
+        return column_positions
+
+    def _assign_to_column(self, box: dict, column_positions: List[float]) -> int:
+        """Assign a text box to the nearest column"""
+        if not column_positions:
+            return 0
+        
+        x = box['x_center']
+        
+        # Find nearest column
+        distances = [abs(x - col_pos) for col_pos in column_positions]
+        return distances.index(min(distances))
 
 
 def extract_data_from_image(image_path: str) -> Optional[pd.DataFrame]:
