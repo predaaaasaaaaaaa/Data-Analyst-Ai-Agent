@@ -103,12 +103,24 @@ class ImageProcessor:
                 df = pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
                 return df
             
-            # Determine columns from first row (headers)
-            column_positions = self._detect_columns(rows[0])
+            # Find the row with most cells (likely the header row)
+            header_row_idx = max(range(len(rows)), key=lambda i: len(rows[i]))
+            header_row = rows[header_row_idx]
             
-            # Organize all rows into table structure
+            # Determine columns from header row
+            column_positions = self._detect_columns(header_row)
+            
+            # Build table using header row and subsequent rows
+            # Extract headers
+            headers = [box['text'].strip() for box in header_row]
+            
+            # Build data rows (only rows after header row)
             table_data = []
-            for row_boxes in rows:
+            for row_idx, row_boxes in enumerate(rows):
+                # Skip rows before header row
+                if row_idx <= header_row_idx:
+                    continue
+                    
                 row_data = [''] * len(column_positions)
                 for box in row_boxes:
                     # Find which column this box belongs to
@@ -122,12 +134,8 @@ class ImageProcessor:
                 table_data.append(row_data)
             
             # Create DataFrame
-            if len(table_data) < 2:
+            if not table_data:
                 return pd.DataFrame({'Data': [box['text'] for box in text_boxes]})
-            
-            # Use first row as headers
-            headers = table_data[0]
-            data_rows = table_data[1:]
             
             # Clean headers
             headers = [str(h).strip() if h else f'Column_{i}' for i, h in enumerate(headers)]
