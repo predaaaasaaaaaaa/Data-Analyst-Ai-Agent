@@ -145,7 +145,7 @@ class ImageProcessor:
             # Clean headers
             headers = [str(h).strip() if h else f'Column_{i}' for i, h in enumerate(headers)]
             
-            df = pd.DataFrame(data_rows, columns=headers)
+            df = pd.DataFrame(table_data, columns=headers)
             
             # Try to convert numeric columns
             for col in df.columns:
